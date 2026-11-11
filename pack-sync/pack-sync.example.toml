@@ -1,0 +1,15 @@
+# Your pack's settings, baked into pack-sync when it is built.
+# Copy this file next to your pack (or to pack-sync/pack-sync.toml) and point
+# PACK_SYNC_CONFIG at it; scripts/publish.ps1 does that for you.
+
+# The address that serves /api/pack/*: your pack-sync-hub, or a site with the same API.
+site = "https://example.com"
+
+# The launcher profile the installer creates for your server.
+profile = "My Server"
+
+# The installer's language: "en" or "ru".
+language = "en"
+
+# From `pack-sync keygen`. Left empty, the program builds but refuses to update anything.
+public_key = ""

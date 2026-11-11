@@ -1,0 +1,4 @@
+/target
+/.build
+/pack-sync/pack-sync.toml
+*.log

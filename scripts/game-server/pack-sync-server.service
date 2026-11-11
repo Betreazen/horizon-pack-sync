@@ -1,0 +1,21 @@
+[Unit]
+Description=Keeps the Horizon server on the newest build of the mod pack
+After=network-online.target horizon-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minecraft
+Group=minecraft
+# PACK_SERVER_KEY; install-game-server.sh writes it and fills in __SITE__.
+EnvironmentFile=/etc/pack-sync/server.env
+ExecStart=/opt/pack-sync/pack-sync server \
+    --site __SITE__ \
+    --horizon-server /home/minecraft/.local/bin/horizon-server \
+    --server-dir /srv/minecraft \
+    --state-dir /srv/pack-sync
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

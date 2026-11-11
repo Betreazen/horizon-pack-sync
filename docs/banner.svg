@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400" role="img" aria-labelledby="title desc">
+  <title id="title">pack-sync for Horizon</title>
+  <desc id="desc">One signed build of your mod pack, installed on the server and every player's game by itself.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0b17"/>
+      <stop offset="1" stop-color="#07070f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7cf29c"/>
+      <stop offset="1" stop-color="#3ddbd9"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+    <!-- One voxel: top, left and right faces. -->
+    <g id="cube" stroke="#07070f" stroke-width="1.5" stroke-linejoin="round">
+      <path d="M0 -18 L22 -7 L0 4 L-22 -7 Z" fill="#7cf29c"/>
+      <path d="M-22 -7 L0 4 L0 30 L-22 19 Z" fill="#3bb764"/>
+      <path d="M22 -7 L0 4 L0 30 L22 19 Z" fill="#2a8a4a"/>
+    </g>
+    <g id="cube-cyan" stroke="#07070f" stroke-width="1.5" stroke-linejoin="round">
+      <path d="M0 -18 L22 -7 L0 4 L-22 -7 Z" fill="#6fe7e5"/>
+      <path d="M-22 -7 L0 4 L0 30 L-22 19 Z" fill="#2fb3b1"/>
+      <path d="M22 -7 L0 4 L0 30 L22 19 Z" fill="#1f7f7e"/>
+    </g>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#3ddbd9"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="400" fill="url(#bg)"/>
+  <rect width="1280" height="400" fill="url(#grid)"/>
+
+  <!-- Wordmark -->
+  <g font-family="'JetBrains Mono', 'Cascadia Code', Consolas, monospace">
+    <text x="72" y="150" font-size="76" font-weight="700" fill="#ffffff">pack<tspan fill="url(#accent)">-sync</tspan></text>
+    <text x="76" y="196" font-size="24" fill="#c9cbe0">One signed build of your Horizon mod pack,</text>
+    <text x="76" y="228" font-size="24" fill="#c9cbe0">on the server and every player's game, by itself.</text>
+    <g font-size="17" fill="#8a8ca6">
+      <rect x="76" y="262" width="178" height="34" rx="17" fill="none" stroke="#2c2e48"/>
+      <text x="96" y="285">ed25519 signed</text>
+      <rect x="268" y="262" width="166" height="34" rx="17" fill="none" stroke="#2c2e48"/>
+      <text x="288" y="285">auto rollback</text>
+      <rect x="448" y="262" width="196" height="34" rx="17" fill="none" stroke="#2c2e48"/>
+      <text x="468" y="285">private releases</text>
+    </g>
+  </g>
+
+  <!-- Flow: the owner's build, the server, the players -->
+  <g transform="translate(760 0)">
+    <g font-family="'JetBrains Mono', Consolas, monospace" font-size="15" fill="#8a8ca6" text-anchor="middle">
+      <!-- Build: a stack of voxels -->
+      <g transform="translate(70 196)">
+        <use href="#cube" transform="translate(-11 -6)"/>
+        <use href="#cube" transform="translate(11 5)"/>
+        <use href="#cube-cyan" transform="translate(0 -21)"/>
+      </g>
+      <text x="70" y="268">your build</text>
+      <text x="70" y="290" fill="#5d5f7a">signed</text>
+
+      <path d="M118 176 H200" stroke="#3ddbd9" stroke-width="3" stroke-dasharray="6 7" fill="none" marker-end="url(#arrow)"/>
+
+      <!-- Server: a tower -->
+      <g transform="translate(262 206)">
+        <use href="#cube"/>
+        <use href="#cube" transform="translate(0 -26)"/>
+        <use href="#cube" transform="translate(0 -52)"/>
+        <use href="#cube-cyan" transform="translate(0 -78)"/>
+      </g>
+      <text x="262" y="268">server</text>
+      <text x="262" y="290" fill="#5d5f7a">updates, confirms</text>
+
+      <path d="M312 176 H394" stroke="#3ddbd9" stroke-width="3" stroke-dasharray="6 7" fill="none" marker-end="url(#arrow)"/>
+
+      <!-- Players: three small cubes -->
+      <g transform="translate(450 150)"><use href="#cube-cyan" transform="scale(0.75)"/></g>
+      <g transform="translate(424 196)"><use href="#cube" transform="scale(0.75)"/></g>
+      <g transform="translate(476 196)"><use href="#cube" transform="scale(0.75)"/></g>
+      <text x="450" y="268">players</text>
+      <text x="450" y="290" fill="#5d5f7a">same version</text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,9 @@
+# The hub listens on 127.0.0.1:8140 only; Caddy gives it HTTPS with a free certificate.
+# Replace the domain, point its DNS at this server, and open ports 80 and 443.
+pack.example.com {
+	encode zstd gzip
+	request_body {
+		max_size 64KB
+	}
+	reverse_proxy 127.0.0.1:8140
+}

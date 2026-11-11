@@ -1,0 +1,19 @@
+# The same unit `horizon-server service install --system` writes, for the user install-game-server.sh makes.
+[Unit]
+Description=Horizon server in /srv/minecraft
+Documentation=https://github.com/horizon-rust/horizon/blob/main/docs/server.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=minecraft
+WorkingDirectory=/srv/minecraft
+ExecStart="/home/minecraft/.local/bin/horizon-server" --dir "/srv/minecraft" run
+# SIGTERM makes the supervisor stop the game cleanly; saving a big world takes a moment.
+TimeoutStopSec=180
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Serves the mod pack's signed builds to pack-sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pack-sync-hub
+Group=pack-sync-hub
+# PACK_GITHUB_REPO, PACK_GITHUB_TOKEN and PACK_SERVER_KEY, written by install-hub.sh.
+EnvironmentFile=/etc/pack-sync-hub/hub.env
+ExecStart=/opt/pack-sync-hub/pack-sync-hub --data /var/lib/pack-sync-hub serve --bind 127.0.0.1:8140
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pack-sync-hub
+
+[Install]
+WantedBy=multi-user.target

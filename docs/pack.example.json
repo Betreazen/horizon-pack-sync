@@ -1,0 +1,8 @@
+{
+  "repository": "you/your-pack",
+  "horizon_base": "nightly-2026-11-08-fdc87ae",
+  "mods": [
+    { "repo": "you/your-mod", "tag": "v1.0.0" },
+    { "path": "C:/mods/a-mod-in-progress" }
+  ]
+}
