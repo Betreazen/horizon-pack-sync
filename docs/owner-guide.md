@@ -136,7 +136,7 @@ The script:
 1. Collects the mods from `pack.json`.
 2. Builds `pack-sync` with your `pack-sync.toml` and checks that your private key matches its public key, before anything slow.
 3. Compiles the Windows client with the launcher, in a profile named `pack-build`.
-4. Compiles the Linux server engine in Docker. The game files your launcher prepared go into the container, because preparing them needs a signed-in account.
+4. Compiles the Linux server engine in Docker. The game files your launcher prepared go into the container, because preparing them needs a signed-in account. The server archive keeps only what a dedicated server runs on, the engine and the prepared game files: Mojang's jars and libraries, the sounds (the server engine has no audio) and the test tools stay out, which takes it from about 770 MB to about 85 MB.
 5. Signs a manifest for both and uploads all three files as release `pack-N`.
 
 The first build takes a while: Horizon compiles from scratch, especially the Linux one. Later builds reuse the caches.

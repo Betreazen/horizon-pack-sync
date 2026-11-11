@@ -19,4 +19,12 @@ rm -rf /tmp/engine
 "$launcher" native-build /mods --server-output /tmp/engine --version "$BASE" \
     --profile "$BUILD_PROFILE" "$TRUST_FLAG"
 
+# A dedicated server runs on the engine and the prepared game files (.local/horizon-client*). Left
+# out: Mojang's jars and libraries and the datagen run, which only prepare those files again; the
+# sounds, since the server engine is built without audio; the source tree's test tools; and temp
+# files of an interrupted write. Mojang's files then never reach a release either.
+rm -rf /tmp/engine/tools /tmp/engine/.local/minecraft /tmp/engine/.local/datagen
+find /tmp/engine/.local -type d -path '*/assets/minecraft/sounds' -prune -exec rm -rf {} +
+find /tmp/engine -type f -name '*.tmp' -delete
+
 tar -C /tmp/engine -czf /out/server-linux-x64.tar.gz .
