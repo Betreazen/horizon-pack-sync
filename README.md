@@ -163,7 +163,7 @@ No. It is an independent tool for servers running Horizon, built on the launcher
 
 ## Status
 
-Running on the author's server since November 2026. Covered by 119 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run.
+Running on the author's server since November 2026. Covered by 119 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run. So is shipping content mods (`client-content.tar.gz`): its first build, pack-6 of the author's pack, is published and verified and waits for a server to confirm it.
 
 ## License
 
