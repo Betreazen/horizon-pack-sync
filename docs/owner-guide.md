@@ -58,7 +58,7 @@ Create a **private** GitHub repository, for example `you/your-pack`, with two fi
 |---|---|
 | `repository` | This repository. Builds are published as its releases `pack-1`, `pack-2`, … |
 | `horizon_base` | The installed Horizon version (release or Nightly) whose game files the build plays with. It must be installed and prepared in your launcher |
-| `mods` | Each mod is a public GitHub repository at a tag, or a local folder for trying things out. Every folder with a `horizon-mixin.toml` inside is built |
+| `mods` | Each mod is a public GitHub repository at a tag, or a local folder for trying things out. Every folder with a `horizon-mixin.toml` inside is built into the game. Every folder with a `horizon-mod.toml` is a content mod: its `horizon-mod.toml`, `assets/` and `data/` ship beside the game and are turned on for players and the server. Keep anything else with those files out of the tagged tree, because it ships too |
 
 **`pack-sync.toml`** is baked into the `pack-sync` program you give players:
 
@@ -137,7 +137,8 @@ The script:
 2. Builds `pack-sync` with your `pack-sync.toml` and checks that your private key matches its public key, before anything slow.
 3. Compiles the Windows client with the launcher, in a profile named `pack-build`.
 4. Compiles the Linux server engine in Docker. The game files your launcher prepared go into the container, because preparing them needs a signed-in account. The server archive keeps only what a dedicated server runs on, the engine and the prepared game files: Mojang's jars and libraries, the sounds (the server engine has no audio) and the test tools stay out, which takes it from about 770 MB to about 85 MB.
-5. Signs a manifest for both and uploads all three files as release `pack-N`.
+5. Packs the content mods, if any, into `client-content.tar.gz`, one folder per mod id. This step runs before the builds, so a folder named unlike its mod's id fails in seconds.
+6. Signs a manifest for all of them and uploads the files as release `pack-N`.
 
 The first build takes a while: Horizon compiles from scratch, especially the Linux one. Later builds reuse the caches.
 
@@ -163,6 +164,8 @@ The player runs `pack-sync.exe setup`, agrees, pastes the code and plays with th
 ## Everyday work
 
 **A mod changed.** Tag it in its repository, update the tag in `pack.json`, run `publish.ps1`. Within about five minutes the server warns players in chat (if anyone is online), backs up the world, restarts on the new build and confirms it. Players get it at their next start. Players already in the game must restart it: the server turns away a client with a different mod version.
+
+**The first mod with content.** A pack-sync from before content mods ignores them, so before publishing such a build, update the copies that run it. On the server, run the game server's deploy again. Players run the new `target\release\pack-sync.exe setup` once. Without that, an older copy installs the build without its content, and the server turns away a player whose mod list differs. pack-sync puts content into `horizon-mods/` of the server folder and of the player's profile. It turns on only the mods it installed and leaves a player's own mods alone.
 
 **A build is broken.** If it does not start on the server, pack-sync goes back to the previous engine, marks the build as failed and never tries it again. Players never receive it, because the server never confirmed it. Fix the mod and publish again. Build numbers only grow, so "going back" to old mods means publishing them as a new build.
 

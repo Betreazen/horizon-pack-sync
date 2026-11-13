@@ -49,7 +49,7 @@ sequenceDiagram
     PC->>PC: download, check signature, put into this very launch
 ```
 
-1. **You publish.** `publish.ps1` compiles your mods into a Windows client and a Linux server engine, signs a manifest with your private key, and uploads all three to a release `pack-N` of a private GitHub repository.
+1. **You publish.** `publish.ps1` compiles your mods into a Windows client and a Linux server engine, packs content mods (assets and data) beside them, signs a manifest with your private key, and uploads everything to a release `pack-N` of a private GitHub repository.
 2. **The server follows.** `pack-sync server` runs next to `horizon-server`. It finds the new build, warns players in chat, backs up the world, switches the engine and restarts. If the new build does not stay up, it goes back to the previous one and never tries that build again.
 3. **Players follow the server.** The Horizon launcher runs `pack-sync client` before every start. Players only ever get the build the server has confirmed, so nobody arrives with a newer version than the server.
 
@@ -163,7 +163,7 @@ No. It is an independent tool for servers running Horizon, built on the launcher
 
 ## Status
 
-Running on the author's server since November 2026. Covered by 97 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run.
+Running on the author's server since November 2026. Covered by 115 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run.
 
 ## License
 

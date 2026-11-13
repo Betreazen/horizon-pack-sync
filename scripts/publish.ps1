@@ -24,6 +24,7 @@ $Versions = "$env:APPDATA\horizon-launcher\versions"
 $Work = Join-Path $Root '.build'
 $Mods = Join-Path $Work 'mods'
 $Out = Join-Path $Work 'out'
+$Content = Join-Path $Work 'content'
 $PackSync = Join-Path $Root 'target\release\pack-sync.exe'
 $Config = Join-Path $PackDir 'pack-sync.toml'
 $BuildInstance = 'pack-build'
@@ -32,6 +33,7 @@ $CacheVolume = 'pack-sync-cache'
 $CoreShare = 0.9
 $ClientAsset = 'client-windows-x64.exe.gz'
 $ServerAsset = 'server-linux-x64.tar.gz'
+$ContentAsset = 'client-content.tar.gz'
 $ManifestAsset = 'manifest.signed.json'
 
 function Assert-Success([string]$What) {
@@ -46,26 +48,52 @@ function Get-NextSequence([string]$Repository) {
     return [int64](($numbers | Measure-Object -Maximum).Maximum) + 1
 }
 
-function Copy-ModBundles([string]$Source) {
-    $bundles = Get-ChildItem -LiteralPath $Source -Recurse -Filter 'horizon-mixin.toml' |
-        Where-Object { $_.FullName -notmatch '[\/](target|\.git)[\/]' }
-    if (-not $bundles) { throw "No horizon-mixin.toml under $Source" }
+function Find-ModFiles([string]$Source, [string]$Name) {
+    return @(Get-ChildItem -LiteralPath $Source -Recurse -Filter $Name |
+        Where-Object { $_.FullName -notmatch '[\/](target|\.git)[\/]' })
+}
+
+# The id a content mod's horizon-mod.toml declares: its top-level `id`, before any [table].
+function Get-ContentId([string]$Manifest) {
+    $top = ((Get-Content -Raw -LiteralPath $Manifest) -split '(?m)^\s*\[', 2)[0]
+    if ($top -notmatch '(?m)^\s*id\s*=\s*"([a-z0-9_.-]+)"') { throw "$Manifest has no usable id" }
+    return $Matches[1]
+}
+
+# Native bundles (horizon-mixin.toml) compile into the game; content mods (horizon-mod.toml with
+# assets/ and data/) travel beside it in client-content.tar.gz, one folder per mod id.
+function Copy-ModFiles([string]$Source) {
+    $bundles = Find-ModFiles $Source 'horizon-mixin.toml'
+    $contents = Find-ModFiles $Source 'horizon-mod.toml'
+    if (-not $bundles -and -not $contents) { throw "No horizon-mixin.toml or horizon-mod.toml under $Source" }
     foreach ($bundle in $bundles) {
         Copy-Item -LiteralPath $bundle.Directory.FullName -Destination $Mods -Recurse
+    }
+    foreach ($manifest in $contents) {
+        $id = Get-ContentId $manifest.FullName
+        $target = Join-Path $Content $id
+        if (Test-Path -LiteralPath $target) { throw "Two content mods in the pack are named $id" }
+        New-Item -ItemType Directory -Force $target | Out-Null
+        Copy-Item -LiteralPath $manifest.FullName -Destination $target
+        foreach ($tree in 'assets', 'data') {
+            $part = Join-Path $manifest.Directory.FullName $tree
+            if (Test-Path -LiteralPath $part) { Copy-Item -LiteralPath $part -Destination $target -Recurse }
+        }
+        Write-Host "Content mod $id from $($manifest.Directory.FullName)"
     }
 }
 
 function Get-Mods($Pack) {
     foreach ($mod in $Pack.mods) {
         if ($mod.path) {
-            Copy-ModBundles $mod.path
+            Copy-ModFiles $mod.path
             continue
         }
         $name = $mod.repo -replace '[^A-Za-z0-9_.-]', '_'
         $checkout = Join-Path $Work "src\$name"
         git clone --quiet --depth 1 --branch $mod.tag "https://github.com/$($mod.repo).git" $checkout
         Assert-Success "Cloning $($mod.repo)"
-        Copy-ModBundles $checkout
+        Copy-ModFiles $checkout
     }
 }
 
@@ -138,6 +166,16 @@ try {
 # Before the long builds: a wrong key would otherwise surface only at the very end.
 & $PackSync check-key --key $KeyFile
 Assert-Success 'Checking the signing key'
+# Also before the long builds: a content folder named unlike its mod's id fails here.
+$Files = @()
+$ContentArguments = @()
+if (Test-Path -LiteralPath $Content) {
+    $ContentPath = Join-Path $Out $ContentAsset
+    & $PackSync pack-content --dir $Content --out $ContentPath
+    Assert-Success 'Packing the content mods'
+    $Files += $ContentPath
+    $ContentArguments = @('--content', $ContentPath)
+}
 Build-Client $Pack.horizon_base
 Build-Server $Pack.horizon_base
 
@@ -145,14 +183,14 @@ $ClientPath = Join-Path $Out $ClientAsset
 $ServerPath = Join-Path $Out $ServerAsset
 $ManifestPath = Join-Path $Out $ManifestAsset
 & $PackSync release --sequence $Sequence --horizon-base $Pack.horizon_base --client $ClientPath `
-    --server $ServerPath --key $KeyFile --out $ManifestPath
+    --server $ServerPath @ContentArguments --key $KeyFile --out $ManifestPath
 Assert-Success 'Signing'
 
 if ($NoUpload) {
     Write-Host "Signed pack-$Sequence in $Out, not uploaded."
     return
 }
-gh release create "pack-$Sequence" $ManifestPath $ClientPath $ServerPath `
+gh release create "pack-$Sequence" $ManifestPath $ClientPath $ServerPath @Files `
     --repo $Pack.repository --title "Pack $Sequence" --notes "Horizon $($Pack.horizon_base)" --latest
 Assert-Success 'Publishing'
 Write-Host "Published pack-$Sequence. The server picks it up at its next check."

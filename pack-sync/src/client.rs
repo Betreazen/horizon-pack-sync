@@ -13,12 +13,15 @@ use anyhow::{Context, Result, bail};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
+use crate::content;
 use crate::files::{check_artifact, gunzip, replace_keeping_previous, sha256_of};
 use crate::launcher::Launcher;
 use crate::manifest::{CLIENT_ARTIFACT, Manifest};
 use crate::site::Site;
 
 const WINDOWS_PROGRAM_MAGIC: &[u8] = b"MZ";
+/// Beside the kept program: the build's content mods as they came out of the archive.
+const CONTENT_FOLDER: &str = "content";
 const DOWNLOAD_SUFFIX: &str = "download";
 const UNPACKED_SUFFIX: &str = "new";
 const GAME_PROGRAM: &str = "horizon-client.exe";
@@ -39,6 +42,12 @@ pub struct ClientState {
     pub build: Option<PathBuf>,
     #[serde(default)]
     pub build_sha256: Option<String>,
+    /// The content mods pack-sync put into the instance's `horizon-mods/`.
+    #[serde(default)]
+    pub content: Vec<String>,
+    /// The checksum of the content archive they came from; `None` when the build had none.
+    #[serde(default)]
+    pub content_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,9 +100,6 @@ impl Sync<'_> {
 
     fn update(&self, state: &ClientState) -> Result<(ClientState, Outcome)> {
         let manifest = self.site.manifest()?.open(self.key)?;
-        if manifest.sequence == state.sequence {
-            return Ok((state.clone(), Outcome::UpToDate));
-        }
         if manifest.sequence < state.sequence {
             bail!(
                 "the site offered build {} but {} is installed",
@@ -101,8 +107,22 @@ impl Sync<'_> {
                 state.sequence
             );
         }
+        if manifest.sequence == state.sequence {
+            // An install interrupted after the program, or made by a pack-sync from before
+            // content mods, may lack this build's content.
+            if content::checksum(&manifest) == state.content_sha256 {
+                return Ok((state.clone(), Outcome::UpToDate));
+            }
+            let installed = self.install_content(&manifest, &state.instance, &state.content)?;
+            let next = ClientState {
+                content: installed.ids,
+                content_sha256: installed.sha256,
+                ..state.clone()
+            };
+            return Ok((next, Outcome::UpToDate));
+        }
         if manifest.horizon_base != state.horizon_base {
-            let installed = self.install_fresh(&manifest, &state.instance)?;
+            let installed = self.install_fresh(&manifest, &state.instance, &state.content)?;
             if let Err(error) = self.launcher.remove(&state.version_tag) {
                 eprintln!("the old version stays installed: {error:#}");
             }
@@ -113,10 +133,14 @@ impl Sync<'_> {
                 sequence: manifest.sequence,
                 build: Some(installed.build.program),
                 build_sha256: Some(installed.build.sha256),
+                content: installed.content.ids,
+                content_sha256: installed.content.sha256,
                 ..state.clone()
             };
             return Ok((next, Outcome::RestartNeeded(manifest.sequence)));
         }
+        // Content first: if the program then fails, the next launch retries the whole build.
+        let installed = self.install_content(&manifest, &state.instance, &state.content)?;
         let build = self.store_build(&manifest)?;
         if self.staged.is_none() {
             replace_from(&build.program, &state.program)?;
@@ -125,9 +149,32 @@ impl Sync<'_> {
             sequence: manifest.sequence,
             build: Some(build.program),
             build_sha256: Some(build.sha256),
+            content: installed.ids,
+            content_sha256: installed.sha256,
             ..state.clone()
         };
         Ok((next, Outcome::Updated(manifest.sequence)))
+    }
+
+    /// Fetches the build's content mods and puts them into the instance's game folder, taking out
+    /// those of `managed` the build no longer has.
+    fn install_content(
+        &self,
+        manifest: &Manifest,
+        instance: &str,
+        managed: &[String],
+    ) -> Result<InstalledContent> {
+        let unpacked = self
+            .builds_dir
+            .join(manifest.sequence.to_string())
+            .join(CONTENT_FOLDER);
+        content::fetch(self.site, manifest, &unpacked)?;
+        let home = self.launcher.instance_home(instance)?;
+        let ids = content::install(&unpacked, &home, managed)?;
+        Ok(InstalledContent {
+            ids,
+            sha256: content::checksum(manifest),
+        })
     }
 
     /// Puts the current build where this launch will start it, unless it is there already.
@@ -198,11 +245,17 @@ impl Sync<'_> {
 
     /// Installs the build as a new version pinned to `instance`, leaving the player's selected
     /// version as it was.
-    pub fn install_fresh(&self, manifest: &Manifest, instance: &str) -> Result<FreshInstall> {
+    pub fn install_fresh(
+        &self,
+        manifest: &Manifest,
+        instance: &str,
+        managed: &[String],
+    ) -> Result<FreshInstall> {
         let before = self.launcher.installed()?;
         if !before.installed.contains(&manifest.horizon_base) {
             self.launcher.install(&manifest.horizon_base)?;
         }
+        let content = self.install_content(manifest, instance, managed)?;
         let build = self.store_build(manifest)?;
         let imported = self
             .launcher
@@ -218,6 +271,7 @@ impl Sync<'_> {
             program: self.launcher.program_path(&imported.imported)?,
             tag: imported.imported,
             build,
+            content,
         })
     }
 }
@@ -227,6 +281,14 @@ pub struct FreshInstall {
     pub program: PathBuf,
     pub tag: String,
     pub build: StoredBuild,
+    pub content: InstalledContent,
+}
+
+/// The content mods a sync put into the game folder, and their archive's checksum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledContent {
+    pub ids: Vec<String>,
+    pub sha256: Option<String>,
 }
 
 /// Replaces `target` with a copy of `source`, keeping the old one beside it.
@@ -302,6 +364,82 @@ mod tests {
         site_serving(Signed::create(&manifest, &world.key).expect("sign"), file)
     }
 
+    /// A build whose release also carries content mods.
+    fn content_site(world: &World, sequence: u64, mods: &[(&str, &str)]) -> FakeSite {
+        let file = gzip(NEW_PROGRAM);
+        let mut manifest = manifest_for(sequence, "base-1", &file);
+        let (bytes, artifact) = content::tests::archive_of(mods);
+        manifest
+            .artifacts
+            .insert(crate::manifest::CONTENT_ARTIFACT.into(), artifact);
+        let site = site_serving(Signed::create(&manifest, &world.key).expect("sign"), file);
+        FakeSite {
+            files: BTreeMap::from([
+                (ASSET.to_owned(), gzip(NEW_PROGRAM)),
+                (content::CONTENT_ASSET.to_owned(), bytes),
+            ]),
+            signed: site.signed,
+            ..FakeSite::default()
+        }
+    }
+
+    /// What the content mod `id` holds in the player's instance, if it is there.
+    fn installed_marker(world: &World, id: &str) -> Option<String> {
+        let path = world
+            .dir
+            .path()
+            .join("instances")
+            .join("pack")
+            .join("horizon-mods")
+            .join(id)
+            .join("data")
+            .join("marker.txt");
+        fs::read_to_string(path).ok()
+    }
+
+    #[test]
+    fn a_build_with_content_puts_it_into_the_instance() {
+        let world = world(1);
+        let (state, outcome) = run_staged(
+            &world,
+            &world.state,
+            &content_site(&world, 2, &[("rustcraft", "v2")]),
+        );
+        assert_eq!(outcome, Outcome::Updated(2));
+        assert_eq!(state.content, ["rustcraft"]);
+        assert!(state.content_sha256.is_some());
+        assert_eq!(installed_marker(&world, "rustcraft").as_deref(), Some("v2"));
+        assert_eq!(read(&world.staged), NEW_PROGRAM);
+    }
+
+    #[test]
+    fn content_missing_from_the_current_build_is_installed_without_the_program() {
+        let world = world(2);
+        let site = content_site(&world, 2, &[("rustcraft", "v2")]);
+        let (state, outcome) = run(&world, &site);
+        assert_eq!(outcome, Outcome::UpToDate);
+        assert_eq!(state.content, ["rustcraft"]);
+        assert_eq!(site.downloads.get(), 1);
+        assert_eq!(read(&world.state.program), OLD_PROGRAM);
+        // And the next launch has nothing to do.
+        let (_, again) = run_with(&world, &state, &site, None);
+        assert_eq!(again, Outcome::UpToDate);
+        assert_eq!(site.downloads.get(), 1);
+    }
+
+    #[test]
+    fn a_swapped_content_archive_keeps_the_old_build() {
+        let world = world(1);
+        let mut site = content_site(&world, 2, &[("rustcraft", "v2")]);
+        let (evil, _) = content::tests::archive_of(&[("rustcraft", "evil")]);
+        site.files.insert(content::CONTENT_ASSET.into(), evil);
+        let (state, outcome) = run_staged(&world, &world.state, &site);
+        assert!(matches!(outcome, Outcome::Kept(_)));
+        assert_eq!(state.sequence, 1);
+        assert_eq!(read(&world.staged), OLD_PROGRAM);
+        assert_eq!(installed_marker(&world, "rustcraft"), None);
+    }
+
     struct World {
         dir: tempfile::TempDir,
         key: SigningKey,
@@ -329,6 +467,8 @@ mod tests {
             sequence,
             build: None,
             build_sha256: None,
+            content: Vec::new(),
+            content_sha256: None,
         };
         World {
             dir,

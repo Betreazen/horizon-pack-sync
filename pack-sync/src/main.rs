@@ -2,6 +2,7 @@
 //! How it fits together: README.md, docs/owner-guide.md and docs/security.md.
 
 mod client;
+mod content;
 mod files;
 mod launcher;
 mod manifest;
@@ -97,9 +98,20 @@ enum Action {
         client: PathBuf,
         #[arg(long)]
         server: PathBuf,
+        /// The content mods' archive from pack-content, when the pack has any
+        #[arg(long)]
+        content: Option<PathBuf>,
         #[arg(long)]
         key: PathBuf,
         /// Where to write the signed manifest
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Pack content mods (one folder per mod id: horizon-mod.toml, assets, data) for a release
+    PackContent {
+        #[arg(long)]
+        dir: PathBuf,
+        /// The archive to write; release wants it named client-content.tar.gz
         #[arg(long)]
         out: PathBuf,
     },
@@ -239,6 +251,7 @@ fn run_server(options: &ServerOptions) -> Result<()> {
         game: &game,
         key: &key,
         engines: &engines,
+        game_dir: &options.server_dir,
         warning: options.warning,
         start_timeout: options.start_timeout,
         sleep: &sleep,
@@ -320,6 +333,7 @@ fn dispatch(action: Action) -> Result<ExitCode> {
             horizon_base,
             client,
             server,
+            content,
             key,
             out,
         } => {
@@ -329,10 +343,12 @@ fn dispatch(action: Action) -> Result<ExitCode> {
                 horizon_base,
                 client,
                 server,
+                content,
                 key,
                 out,
             })?;
         }
+        Action::PackContent { dir, out } => content::pack(&dir, &out)?,
     }
     Ok(ExitCode::SUCCESS)
 }

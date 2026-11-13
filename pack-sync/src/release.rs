@@ -8,9 +8,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
+use crate::content::CONTENT_ASSET;
 use crate::files::{sha256_of, write_json};
 use crate::manifest::{
-    Artifact, CLIENT_ARTIFACT, Manifest, SERVER_ARTIFACT, Signed, parse_signing_key,
+    Artifact, CLIENT_ARTIFACT, CONTENT_ARTIFACT, Manifest, SERVER_ARTIFACT, Signed,
+    parse_signing_key,
 };
 
 const KEY_BYTES: usize = 32;
@@ -38,6 +40,8 @@ pub struct Input {
     pub horizon_base: String,
     pub client: PathBuf,
     pub server: PathBuf,
+    /// The content mods' archive from `pack-content`, when the pack has any.
+    pub content: Option<PathBuf>,
     pub key: PathBuf,
     pub out: PathBuf,
 }
@@ -73,10 +77,17 @@ pub fn check_key(path: &Path, embedded: &VerifyingKey) -> Result<()> {
 
 pub fn release(input: &Input) -> Result<()> {
     let key = parse_signing_key(&fs::read_to_string(&input.key).context("cannot read the key")?)?;
-    let artifacts = BTreeMap::from([
+    let mut artifacts = BTreeMap::from([
         (CLIENT_ARTIFACT.to_owned(), describe(&input.client)?),
         (SERVER_ARTIFACT.to_owned(), describe(&input.server)?),
     ]);
+    if let Some(content) = &input.content {
+        let artifact = describe(content)?;
+        if artifact.asset != CONTENT_ASSET {
+            bail!("name the content archive {CONTENT_ASSET}: players may only fetch client- files");
+        }
+        artifacts.insert(CONTENT_ARTIFACT.to_owned(), artifact);
+    }
     let manifest = Manifest::new(input.sequence, input.horizon_base.clone(), artifacts);
     write_json(&input.out, &Signed::create(&manifest, &key)?)
 }
@@ -122,6 +133,7 @@ mod tests {
             horizon_base: "base".into(),
             client,
             server,
+            content: None,
             key: key_file,
             out: out.clone(),
         })
@@ -141,5 +153,47 @@ mod tests {
             manifest.artifact(CLIENT_ARTIFACT).expect("client").asset,
             "client.exe.gz"
         );
+        assert!(!manifest.artifacts.contains_key(CONTENT_ARTIFACT));
+    }
+
+    fn release_with_content(dir: &Path, name: &str) -> Result<()> {
+        let key_file = dir.join("key");
+        fs::write(&key_file, hex::encode([7_u8; KEY_BYTES])).expect("write");
+        let files = ["client.exe.gz", "server.tar.gz", name].map(|file| dir.join(file));
+        for file in &files {
+            fs::write(file, b"x").expect("write");
+        }
+        let [client, server, content] = files;
+        release(&Input {
+            sequence: 3,
+            horizon_base: "base".into(),
+            client,
+            server,
+            content: Some(content),
+            key: key_file,
+            out: dir.join("manifest.signed.json"),
+        })
+    }
+
+    #[test]
+    fn a_release_with_content_lists_it() {
+        let dir = tempfile::tempdir().expect("dir");
+        release_with_content(dir.path(), CONTENT_ASSET).expect("release");
+        let signed: Signed = serde_json::from_slice(
+            &fs::read(dir.path().join("manifest.signed.json")).expect("read"),
+        )
+        .expect("json");
+        let public = SigningKey::from_bytes(&[7; KEY_BYTES]).verifying_key();
+        let manifest = signed.open(&public).expect("opens");
+        assert_eq!(
+            manifest.artifact(CONTENT_ARTIFACT).expect("content").asset,
+            CONTENT_ASSET
+        );
+    }
+
+    #[test]
+    fn content_under_a_name_players_cannot_fetch_is_refused() {
+        let dir = tempfile::tempdir().expect("dir");
+        assert!(release_with_content(dir.path(), "content.tar.gz").is_err());
     }
 }

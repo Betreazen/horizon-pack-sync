@@ -174,7 +174,8 @@ pub fn run(code: Option<String>, site: Option<String>, key: &VerifyingKey) -> Re
         builds_dir: &builds,
         staged: None,
     };
-    let installed = sync.install_fresh(&manifest, &instance)?;
+    // A second setup over an earlier one starts the list afresh: it only adds and replaces.
+    let installed = sync.install_fresh(&manifest, &instance, &[])?;
     launcher.set_pre_launch(&instance, &pre_launch_command(&program)?)?;
 
     crate::files::write_json(
@@ -190,6 +191,8 @@ pub fn run(code: Option<String>, site: Option<String>, key: &VerifyingKey) -> Re
             sequence: manifest.sequence,
             build: Some(installed.build.program),
             build_sha256: Some(installed.build.sha256),
+            content: installed.content.ids,
+            content_sha256: installed.content.sha256,
         },
     )?;
     println!("{}", text.done.replace("{profile}", PROFILE_NAME));

@@ -20,6 +20,8 @@ pub trait Launcher {
     fn prepare(&self, version: &str) -> Result<()>;
     fn remove(&self, version: &str) -> Result<()>;
     fn program_path(&self, version: &str) -> Result<PathBuf>;
+    /// The instance's game folder, the one holding `options.txt` and `horizon-mods/`.
+    fn instance_home(&self, instance: &str) -> Result<PathBuf>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
@@ -38,6 +40,8 @@ pub struct Imported {
 pub struct Instance {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub home: Option<PathBuf>,
 }
 
 pub struct RealLauncher {
@@ -145,6 +149,15 @@ impl Launcher for RealLauncher {
         }
         Ok(path)
     }
+
+    fn instance_home(&self, instance: &str) -> Result<PathBuf> {
+        self.instances()?
+            .into_iter()
+            .find(|known| known.id == instance)
+            .with_context(|| format!("the launcher has no instance {instance}"))?
+            .home
+            .with_context(|| format!("the launcher names no folder for instance {instance}"))
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +239,19 @@ pub mod tests {
         fn program_path(&self, version: &str) -> Result<PathBuf> {
             Ok(self.folder.join(version).join(GAME_PROGRAM))
         }
+
+        fn instance_home(&self, instance: &str) -> Result<PathBuf> {
+            Ok(self.folder.join("instances").join(instance))
+        }
+    }
+
+    #[test]
+    fn an_instance_lists_its_game_folder() {
+        let json = r#"[{"id":"pack","name":"My Server","home":"C:\\games\\pack","icon":null}]"#;
+        let instances: Vec<Instance> = serde_json::from_str(json).expect("parse");
+        assert_eq!(
+            instances[0].home.as_deref(),
+            Some(Path::new("C:\\games\\pack"))
+        );
     }
 }

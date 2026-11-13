@@ -4,7 +4,7 @@ pack-sync installs native code on players' computers and on your server. Horizon
 
 ## Trust in one place: your signing key
 
-Every build has a manifest listing the exact size and SHA-256 of its client and server files. The manifest is signed with your ed25519 key, and `pack-sync` carries your public key from the moment you build it.
+Every build has a manifest listing the exact size and SHA-256 of its client and server files, and of its content mods when it has any. The manifest is signed with your ed25519 key, and `pack-sync` carries your public key from the moment you build it.
 
 Before using anything, pack-sync:
 
@@ -44,6 +44,7 @@ Deploy scripts pass secrets on stdin, so they never appear in a process list, a 
 - **Players never get ahead of the server.** They receive only the build the server confirmed after it started cleanly.
 - **Rate limit.** 60 requests a minute per address (per /64 for IPv6). `X-Forwarded-For` is trusted only from a proxy on the same machine.
 - **Unpacking.** Archives are unpacked with the `tar` crate, which refuses paths that climb out of the target folder, and only after their hash matched.
+- **Content mods.** The content archive is signed like the other files. Each top folder in it must be a mod id of lowercase letters, digits, `_`, `-` and `.`, so it can only land in `horizon-mods/<id>/`. pack-sync turns on and removes only the mods it installed itself: a player's own mods and switches in `horizon-mods.txt` are left alone.
 - **Failure is safe.** A player whose update fails plays on the build they had. A server build that does not start is rolled back and never retried.
 - **Consent.** The installer tells the player that mods run with full rights and installs only after an explicit yes. Building with `--trust-native-code` is the owner's own decision; the scripts require you to pass it yourself.
 

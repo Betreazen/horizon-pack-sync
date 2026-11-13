@@ -9,9 +9,13 @@ use anyhow::{Context, Result, bail};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
+use crate::content;
 use crate::files::{check_artifact, untar_gz};
 use crate::manifest::{Manifest, SERVER_ARTIFACT};
 use crate::site::Site;
+
+/// Inside each engine folder: that build's content mods as they came out of the archive.
+const CONTENT_FOLDER: &str = ".pack-sync-content";
 
 const ENGINE_PROGRAM: &str = if cfg!(windows) {
     "horizon-engine.exe"
@@ -36,6 +40,9 @@ pub struct ServerState {
     pub reported: bool,
     /// Builds that failed to start and must not be tried again.
     pub failed: Vec<u64>,
+    /// The content mods pack-sync put into the server folder's `horizon-mods/`.
+    #[serde(default)]
+    pub content: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +75,8 @@ pub struct Updater<'a> {
     pub game: &'a dyn Game,
     pub key: &'a VerifyingKey,
     pub engines: &'a Path,
+    /// The server folder, whose `horizon-mods/` gets each build's content mods.
+    pub game_dir: &'a Path,
     pub warning: Duration,
     pub start_timeout: Duration,
     pub sleep: &'a dyn Fn(Duration),
@@ -96,6 +105,8 @@ impl Updater<'_> {
         self.warn_players()?;
         self.game
             .backup(&format!("before-pack-{}", manifest.sequence))?;
+        // The running server read its content at start: the new files count from the restart.
+        let content = content::install(&content_beside(&engine), self.game_dir, &state.content)?;
         self.game.set_engine(&engine)?;
         self.game.restart()?;
         if self.wait_until_stable() {
@@ -103,6 +114,7 @@ impl Updater<'_> {
                 sequence: manifest.sequence,
                 reported: false,
                 failed: state.failed.clone(),
+                content,
             };
             self.prune(manifest.sequence);
             return Ok((self.report(&done), Outcome::Updated(manifest.sequence)));
@@ -110,10 +122,17 @@ impl Updater<'_> {
         // Recorded whatever the rollback does: retrying would restart the server every round.
         let mut failed = state.failed.clone();
         failed.push(manifest.sequence);
-        let next = ServerState { failed, ..state };
-        let outcome = match self.roll_back(previous.as_deref()) {
-            Ok(()) => Outcome::RolledBack(manifest.sequence),
-            Err(error) => Outcome::Stranded(manifest.sequence, format!("{error:#}")),
+        let (content, outcome) = match self.roll_back(previous.as_deref(), &content) {
+            Ok(restored) => (restored, Outcome::RolledBack(manifest.sequence)),
+            Err(error) => (
+                content,
+                Outcome::Stranded(manifest.sequence, format!("{error:#}")),
+            ),
+        };
+        let next = ServerState {
+            failed,
+            content,
+            ..state
         };
         Ok((next, outcome))
     }
@@ -151,6 +170,12 @@ impl Updater<'_> {
             let _ = fs::remove_file(&archive);
             result?;
         }
+        // Apart from the marker: an engine unpacked by a pack-sync from before content mods
+        // still gets its build's content.
+        let content = folder.join(CONTENT_FOLDER);
+        if !content.exists() {
+            content::fetch(self.site, manifest, &content)?;
+        }
         let engine = folder.join(ENGINE_PROGRAM);
         if !engine.exists() {
             bail!("the build has no {ENGINE_PROGRAM}");
@@ -183,10 +208,13 @@ impl Updater<'_> {
         false
     }
 
-    fn roll_back(&self, previous: Option<&Path>) -> Result<()> {
+    /// Puts back the earlier engine and its build's content; the content pack-sync then manages.
+    fn roll_back(&self, previous: Option<&Path>, managed: &[String]) -> Result<Vec<String>> {
         let path = previous.context("the new build failed and there is no earlier engine")?;
+        let content = content::install(&content_beside(path), self.game_dir, managed)?;
         self.game.set_engine(path)?;
-        self.game.restart()
+        self.game.restart()?;
+        Ok(content)
     }
 
     /// Keeps the newest few engines for manual rollback; a leftover costs only disk.
@@ -294,6 +322,14 @@ fn is_not_running(message: &str) -> bool {
     message.contains(NOT_RUNNING)
 }
 
+/// Where a build's content mods are kept: inside its engine folder, so a rollback finds them.
+fn content_beside(engine: &Path) -> PathBuf {
+    engine.parent().map_or_else(
+        || PathBuf::from(CONTENT_FOLDER),
+        |folder| folder.join(CONTENT_FOLDER),
+    )
+}
+
 /// The prepared game files a server export carries, if any.
 fn resources_beside(engine: &Path) -> Option<PathBuf> {
     let versions = engine.parent()?.join(EXPORTED_RESOURCES);
@@ -376,6 +412,88 @@ mod tests {
         site
     }
 
+    /// A build whose release also carries content mods.
+    fn site_with_content(sequence: u64, mods: &[(&str, &str)]) -> FakeSite {
+        let site = site_with_build(sequence);
+        let opened = site
+            .signed
+            .borrow()
+            .clone()
+            .expect("signed")
+            .open(&signing_key(1).verifying_key())
+            .expect("open");
+        let (bytes, artifact) = crate::content::tests::archive_of(mods);
+        let mut artifacts = opened.artifacts;
+        artifacts.insert(crate::manifest::CONTENT_ARTIFACT.into(), artifact);
+        let manifest = Manifest::new(sequence, "base".into(), artifacts);
+        let mut files = site.files.clone();
+        files.insert(crate::content::CONTENT_ASSET.into(), bytes);
+        let site = FakeSite {
+            files,
+            ..FakeSite::default()
+        };
+        *site.signed.borrow_mut() = Some(Signed::create(&manifest, &signing_key(1)).expect("sign"));
+        site
+    }
+
+    fn marker(game_dir: &Path, id: &str) -> Option<String> {
+        let path = game_dir
+            .join("horizon-mods")
+            .join(id)
+            .join("data")
+            .join("marker.txt");
+        fs::read_to_string(path).ok()
+    }
+
+    #[test]
+    fn a_build_with_content_installs_it_in_the_server_folder() {
+        let dir = tempfile::tempdir().expect("dir");
+        let game = FakeGame::default();
+        game.comes_up.set(true);
+        let site = site_with_content(2, &[("rustcraft", "v2")]);
+        let (state, outcome) = run(&site, &game, dir.path(), &state_at(1));
+        assert_eq!(outcome, Outcome::Updated(2));
+        assert_eq!(state.content, ["rustcraft"]);
+        assert_eq!(
+            marker(&dir.path().join("game"), "rustcraft").as_deref(),
+            Some("v2")
+        );
+    }
+
+    #[test]
+    fn a_rollback_puts_back_the_earlier_builds_content() {
+        let dir = tempfile::tempdir().expect("dir");
+        let game_dir = dir.path().join("game");
+        let game = FakeGame::default();
+        game.comes_up.set(true);
+        let first = site_with_content(2, &[("a", "v2")]);
+        let (state, _) = run(&first, &game, dir.path(), &state_at(1));
+
+        game.comes_up.set(false);
+        let site = site_with_content(3, &[("a", "v3"), ("b", "v3")]);
+        let (state, outcome) = run(&site, &game, dir.path(), &state);
+        assert_eq!(outcome, Outcome::RolledBack(3));
+        assert_eq!(state.content, ["a"]);
+        assert_eq!(marker(&game_dir, "a").as_deref(), Some("v2"));
+        assert_eq!(marker(&game_dir, "b"), None);
+    }
+
+    #[test]
+    fn a_build_without_content_leaves_the_server_folder_alone() {
+        let dir = tempfile::tempdir().expect("dir");
+        let game = FakeGame::default();
+        game.comes_up.set(true);
+        run(&site_with_build(2), &game, dir.path(), &state_at(1));
+        assert!(!dir.path().join("game").exists());
+    }
+
+    #[test]
+    fn an_old_state_file_without_content_still_reads() {
+        let state: ServerState =
+            serde_json::from_str(r#"{"sequence":4,"reported":true,"failed":[]}"#).expect("reads");
+        assert!(state.content.is_empty());
+    }
+
     #[derive(Default)]
     struct FakeGame {
         comes_up: Cell<bool>,
@@ -441,6 +559,7 @@ mod tests {
             game,
             key: &key,
             engines: dir,
+            game_dir: &dir.join("game"),
             warning: Duration::from_secs(120),
             start_timeout: Duration::from_millis(5),
             sleep: &sleep,
@@ -453,6 +572,7 @@ mod tests {
             sequence,
             reported: true,
             failed: Vec::new(),
+            content: Vec::new(),
         }
     }
 
@@ -469,7 +589,8 @@ mod tests {
             ServerState {
                 sequence: 2,
                 reported: true,
-                failed: Vec::new()
+                failed: Vec::new(),
+                content: Vec::new(),
             }
         );
         assert_eq!(site.confirmed.get(), Some(2));
@@ -531,6 +652,7 @@ mod tests {
             game: &game,
             key: &key,
             engines: dir.path(),
+            game_dir: &dir.path().join("game"),
             warning: Duration::ZERO,
             start_timeout: Duration::from_millis(5),
             sleep: &sleep,
@@ -575,6 +697,7 @@ mod tests {
             sequence: 1,
             reported: true,
             failed: vec![2],
+            content: Vec::new(),
         };
         assert!(matches!(
             run(&site, &game, dir.path(), &state).1,
@@ -626,6 +749,7 @@ mod tests {
             sequence: 2,
             reported: false,
             failed: Vec::new(),
+            content: Vec::new(),
         };
         let (state, outcome) = run(&site, &game, dir.path(), &state);
         assert_eq!(outcome, Outcome::UpToDate);

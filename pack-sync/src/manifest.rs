@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 pub const CLIENT_ARTIFACT: &str = "client-windows-x64";
 pub const SERVER_ARTIFACT: &str = "server-linux-x64";
+/// Optional: the content mods both sides install. Older pack-sync ignores it.
+pub const CONTENT_ARTIFACT: &str = "content";
 const FORMAT: u32 = 1;
 const KEY_LENGTH: usize = 32;
 

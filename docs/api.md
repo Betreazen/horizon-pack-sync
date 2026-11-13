@@ -32,10 +32,13 @@ The `manifest` string, once its signature checks out, reads:
   "horizon_base": "nightly-2026-11-08-fdc87ae",
   "artifacts": {
     "client-windows-x64": { "asset": "client-windows-x64.exe.gz", "sha256": "…", "size": 37125659 },
-    "server-linux-x64":   { "asset": "server-linux-x64.tar.gz",   "sha256": "…", "size": 766468145 }
+    "server-linux-x64":   { "asset": "server-linux-x64.tar.gz",   "sha256": "…", "size": 85234567 },
+    "content":            { "asset": "client-content.tar.gz",     "sha256": "…", "size": 77540 }
   }
 }
 ```
+
+`content` is there only when the pack has content mods: one folder per mod id with `horizon-mod.toml`, `assets/` and `data/`. Both the players and the server install it into their game folder's `horizon-mods/` and turn each mod on in `horizon-mods.txt`. Its name starts with `client-` because players fetch it too. A pack-sync from before content mods ignores the entry.
 
 ## `GET /api/pack/file/{sequence}/{asset}`
 
