@@ -22,12 +22,26 @@ const MANIFEST: &str = "horizon-mod.toml";
 const MODS_FOLDER: &str = "horizon-mods";
 const SWITCHES: &str = "horizon-mods.txt";
 const NEW_SUFFIX: &str = ".pack-sync-new";
-const OLD_SUFFIX: &str = ".pack-sync-old";
+/// Beside `horizon-mods/`, never inside it, so the game never reads a half-done copy.
+const STAGING: &str = ".pack-sync";
+const STAGING_NEW: &str = "new";
+const STAGING_OLD: &str = "old";
+/// A mod folder pack-sync did not put there (a developer's copy, say) is moved here, not lost.
+const STAGING_REPLACED: &str = "replaced";
+/// Names Windows will not give a folder, with or without an extension.
+const RESERVED: [&str; 4] = ["con", "prn", "aux", "nul"];
 
-/// A mod id that is safe as a folder name and a `horizon-mods.txt` key.
+/// A mod id that is safe as a folder name on every system and a `horizon-mods.txt` key.
 fn check_id(id: &str) -> Result<()> {
+    let stem = id.split('.').next().unwrap_or_default();
+    let is_device = RESERVED.contains(&stem)
+        || (stem.len() == 4
+            && (stem.starts_with("com") || stem.starts_with("lpt"))
+            && stem.as_bytes()[3].is_ascii_digit());
     let is_safe = !id.is_empty()
         && !id.starts_with('.')
+        && !id.ends_with('.')
+        && !is_device
         && id.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_-.".contains(&byte)
         });
@@ -134,8 +148,8 @@ pub fn checksum(manifest: &Manifest) -> Option<String> {
 }
 
 /// Puts the unpacked content into `game_dir`. `managed` are the ids pack-sync put there before:
-/// those the new content no longer has are taken out. Mods the player added are never touched.
-/// Returns the ids pack-sync now manages.
+/// those the new content no longer has are taken out. Other mods stay; one the build replaces
+/// is kept in `.pack-sync/replaced/`. Returns the ids pack-sync now manages.
 pub fn install(unpacked: &Path, game_dir: &Path, managed: &[String]) -> Result<Vec<String>> {
     // A missing folder is a build without content, such as an engine kept from before them.
     let ids = if unpacked.exists() {
@@ -150,8 +164,10 @@ pub fn install(unpacked: &Path, game_dir: &Path, managed: &[String]) -> Result<V
     if !ids.is_empty() {
         fs::create_dir_all(&mods).with_context(|| format!("cannot create {}", mods.display()))?;
     }
+    let staging = game_dir.join(STAGING);
     for id in &ids {
-        replace_folder(&unpacked.join(id), &mods.join(id))?;
+        let is_ours = managed.contains(id);
+        replace_folder(&unpacked.join(id), &mods.join(id), &staging, id, is_ours)?;
     }
     let dropped: Vec<&String> = managed.iter().filter(|id| !ids.contains(*id)).collect();
     for id in &dropped {
@@ -165,22 +181,45 @@ pub fn install(unpacked: &Path, game_dir: &Path, managed: &[String]) -> Result<V
     Ok(ids.into_iter().collect())
 }
 
-/// Copies `source` over `target`; the old folder goes only once the new one is complete.
-fn replace_folder(source: &Path, target: &Path) -> Result<()> {
-    let fresh = with_suffix(target, NEW_SUFFIX);
-    let old = with_suffix(target, OLD_SUFFIX);
-    for leftover in [&fresh, &old] {
+/// Copies `source` over `target`, staging in `.pack-sync/` on the same disk: the old folder moves
+/// out only once the new one is complete. A folder pack-sync did not put there is kept.
+fn replace_folder(
+    source: &Path,
+    target: &Path,
+    staging: &Path,
+    id: &str,
+    is_ours: bool,
+) -> Result<()> {
+    let fresh = staging.join(STAGING_NEW).join(id);
+    let aside = staging
+        .join(if is_ours {
+            STAGING_OLD
+        } else {
+            STAGING_REPLACED
+        })
+        .join(id);
+    for leftover in [&fresh, &aside] {
         if leftover.exists() {
             fs::remove_dir_all(leftover).context("cannot clear an interrupted install")?;
         }
     }
     copy_tree(source, &fresh)?;
     if target.exists() {
-        fs::rename(target, &old).with_context(|| format!("{} is in use", target.display()))?;
+        if let Some(parent) = aside.parent() {
+            fs::create_dir_all(parent).context("cannot create the staging folder")?;
+        }
+        fs::rename(target, &aside).with_context(|| format!("{} is in use", target.display()))?;
+        if !is_ours {
+            eprintln!(
+                "the build brings its own {id}: the copy that was there is kept in {}",
+                aside.display()
+            );
+        }
     }
     fs::rename(&fresh, target).with_context(|| format!("cannot install {}", target.display()))?;
-    if old.exists() {
-        fs::remove_dir_all(&old).context("cannot remove the old content")?;
+    // The new copy is in place: an old one that cannot go yet (a file held open) only costs disk.
+    if is_ours && let Err(error) = fs::remove_dir_all(&aside) {
+        eprintln!("cannot remove {} yet: {error}", aside.display());
     }
     Ok(())
 }
@@ -359,6 +398,39 @@ pub mod tests {
     }
 
     #[test]
+    fn a_copy_pack_sync_did_not_install_is_kept_aside_not_lost() {
+        let dir = tempfile::tempdir().expect("dir");
+        let game = dir.path().join("game");
+        write_mod(&game.join(MODS_FOLDER), "rustcraft", "dev build");
+        install(&unpacked(dir.path(), &[("rustcraft", "v1")]), &game, &[]).expect("install");
+        assert_eq!(marker(&game, "rustcraft"), "v1");
+        let kept = game
+            .join(STAGING)
+            .join(STAGING_REPLACED)
+            .join("rustcraft")
+            .join("data")
+            .join("marker.txt");
+        assert_eq!(fs::read_to_string(kept).expect("kept"), "dev build");
+    }
+
+    #[test]
+    fn horizon_mods_holds_only_mod_folders_after_an_update() {
+        let dir = tempfile::tempdir().expect("dir");
+        let game = dir.path().join("game");
+        let managed = install(&unpacked(dir.path(), &[("a", "v1")]), &game, &[]).expect("first");
+        let second = dir.path().join("second");
+        write_mod(&second, "a", "v2");
+        install(&second, &game, &managed).expect("second");
+        let names: Vec<String> = fs::read_dir(game.join(MODS_FOLDER))
+            .expect("list")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["a"]);
+        assert!(!game.join(STAGING).join(STAGING_OLD).join("a").exists());
+    }
+
+    #[test]
     fn a_folder_named_unlike_its_mod_is_not_packed() {
         let dir = tempfile::tempdir().expect("dir");
         let source = dir.path().join("content");
@@ -369,7 +441,9 @@ pub mod tests {
 
     #[test]
     fn unsafe_ids_are_refused() {
-        for id in ["", "..", ".hidden", "a/b", "A", "a b"] {
+        for id in [
+            "", "..", ".hidden", "a/b", "A", "a b", "a.", "con", "nul.txt", "com1", "lpt9",
+        ] {
             assert!(check_id(id).is_err(), "{id:?}");
         }
         for id in ["rustcraft", "my_mod", "a-b.c", "x2"] {

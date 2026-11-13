@@ -16,6 +16,7 @@ use crate::site::Site;
 
 /// Inside each engine folder: that build's content mods as they came out of the archive.
 const CONTENT_FOLDER: &str = ".pack-sync-content";
+const CONTENT_MARKER: &str = ".pack-sync-content-unpacked";
 
 const ENGINE_PROGRAM: &str = if cfg!(windows) {
     "horizon-engine.exe"
@@ -107,8 +108,17 @@ impl Updater<'_> {
             .backup(&format!("before-pack-{}", manifest.sequence))?;
         // The running server read its content at start: the new files count from the restart.
         let content = content::install(&content_beside(&engine), self.game_dir, &state.content)?;
-        self.game.set_engine(&engine)?;
-        self.game.restart()?;
+        // From here the folder holds this build's content, so the state says so whatever fails.
+        let state = ServerState { content, ..state };
+        let content = state.content.clone();
+        let switched = self
+            .game
+            .set_engine(&engine)
+            .and_then(|()| self.game.restart());
+        if let Err(error) = switched {
+            let reason = format!("cannot switch to build {}: {error:#}", manifest.sequence);
+            return Ok((state, Outcome::Skipped(reason)));
+        }
         if self.wait_until_stable() {
             let done = ServerState {
                 sequence: manifest.sequence,
@@ -122,12 +132,10 @@ impl Updater<'_> {
         // Recorded whatever the rollback does: retrying would restart the server every round.
         let mut failed = state.failed.clone();
         failed.push(manifest.sequence);
-        let (content, outcome) = match self.roll_back(previous.as_deref(), &content) {
-            Ok(restored) => (restored, Outcome::RolledBack(manifest.sequence)),
-            Err(error) => (
-                content,
-                Outcome::Stranded(manifest.sequence, format!("{error:#}")),
-            ),
+        let (content, rolled_back) = self.roll_back(previous.as_deref(), content);
+        let outcome = match rolled_back {
+            Ok(()) => Outcome::RolledBack(manifest.sequence),
+            Err(error) => Outcome::Stranded(manifest.sequence, format!("{error:#}")),
         };
         let next = ServerState {
             failed,
@@ -170,11 +178,12 @@ impl Updater<'_> {
             let _ = fs::remove_file(&archive);
             result?;
         }
-        // Apart from the marker: an engine unpacked by a pack-sync from before content mods
-        // still gets its build's content.
-        let content = folder.join(CONTENT_FOLDER);
-        if !content.exists() {
-            content::fetch(self.site, manifest, &content)?;
+        // A marker of its own: an engine unpacked by a pack-sync from before content mods still
+        // gets its build's content, and a fetch cut short is redone, never trusted.
+        let content_marker = folder.join(CONTENT_MARKER);
+        if !content_marker.exists() {
+            content::fetch(self.site, manifest, &folder.join(CONTENT_FOLDER))?;
+            fs::write(&content_marker, b"").context("cannot mark the content unpacked")?;
         }
         let engine = folder.join(ENGINE_PROGRAM);
         if !engine.exists() {
@@ -208,13 +217,26 @@ impl Updater<'_> {
         false
     }
 
-    /// Puts back the earlier engine and its build's content; the content pack-sync then manages.
-    fn roll_back(&self, previous: Option<&Path>, managed: &[String]) -> Result<Vec<String>> {
-        let path = previous.context("the new build failed and there is no earlier engine")?;
-        let content = content::install(&content_beside(path), self.game_dir, managed)?;
-        self.game.set_engine(path)?;
-        self.game.restart()?;
-        Ok(content)
+    /// Puts back the earlier engine and its build's content. Returns the content pack-sync then
+    /// manages, which is what the folder holds even when a later step failed.
+    fn roll_back(
+        &self,
+        previous: Option<&Path>,
+        managed: Vec<String>,
+    ) -> (Vec<String>, Result<()>) {
+        let Some(path) = previous else {
+            let error = anyhow::anyhow!("the new build failed and there is no earlier engine");
+            return (managed, Err(error));
+        };
+        let content = match content::install(&content_beside(path), self.game_dir, &managed) {
+            Ok(content) => content,
+            Err(error) => return (managed, Err(error)),
+        };
+        let restarted = self
+            .game
+            .set_engine(path)
+            .and_then(|()| self.game.restart());
+        (content, restarted)
     }
 
     /// Keeps the newest few engines for manual rollback; a leftover costs only disk.
@@ -476,6 +498,22 @@ mod tests {
         assert_eq!(state.content, ["a"]);
         assert_eq!(marker(&game_dir, "a").as_deref(), Some("v2"));
         assert_eq!(marker(&game_dir, "b"), None);
+    }
+
+    #[test]
+    fn a_cut_short_content_unpack_is_redone() {
+        let dir = tempfile::tempdir().expect("dir");
+        let game = FakeGame::default();
+        game.comes_up.set(true);
+        let site = site_with_content(2, &[("a", "v2")]);
+        // An earlier round unpacked the engine but died inside the content.
+        let partial = dir.path().join("2").join(CONTENT_FOLDER).join("a");
+        fs::create_dir_all(&partial).expect("mkdir");
+        fs::write(partial.join("horizon-mod.toml"), "id = \"a\"").expect("write");
+        let (state, outcome) = run(&site, &game, dir.path(), &state_at(1));
+        assert_eq!(outcome, Outcome::Updated(2));
+        assert_eq!(state.content, ["a"]);
+        assert_eq!(marker(&dir.path().join("game"), "a").as_deref(), Some("v2"));
     }
 
     #[test]

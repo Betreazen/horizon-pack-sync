@@ -139,9 +139,11 @@ impl Sync<'_> {
             };
             return Ok((next, Outcome::RestartNeeded(manifest.sequence)));
         }
-        // Content first: if the program then fails, the next launch retries the whole build.
-        let installed = self.install_content(&manifest, &state.instance, &state.content)?;
+        // Both downloads are checked before anything changes in the game. The content goes in
+        // just before the program: if the program then fails, the next launch retries the build.
+        let unpacked = self.fetch_content(&manifest)?;
         let build = self.store_build(&manifest)?;
+        let installed = self.put_content(&unpacked, &manifest, &state.instance, &state.content)?;
         if self.staged.is_none() {
             replace_from(&build.program, &state.program)?;
         }
@@ -164,13 +166,29 @@ impl Sync<'_> {
         instance: &str,
         managed: &[String],
     ) -> Result<InstalledContent> {
+        let unpacked = self.fetch_content(manifest)?;
+        self.put_content(&unpacked, manifest, instance, managed)
+    }
+
+    /// Downloads, checks and unpacks the build's content beside its kept program.
+    fn fetch_content(&self, manifest: &Manifest) -> Result<PathBuf> {
         let unpacked = self
             .builds_dir
             .join(manifest.sequence.to_string())
             .join(CONTENT_FOLDER);
         content::fetch(self.site, manifest, &unpacked)?;
+        Ok(unpacked)
+    }
+
+    fn put_content(
+        &self,
+        unpacked: &Path,
+        manifest: &Manifest,
+        instance: &str,
+        managed: &[String],
+    ) -> Result<InstalledContent> {
         let home = self.launcher.instance_home(instance)?;
-        let ids = content::install(&unpacked, &home, managed)?;
+        let ids = content::install(unpacked, &home, managed)?;
         Ok(InstalledContent {
             ids,
             sha256: content::checksum(manifest),
@@ -255,8 +273,9 @@ impl Sync<'_> {
         if !before.installed.contains(&manifest.horizon_base) {
             self.launcher.install(&manifest.horizon_base)?;
         }
-        let content = self.install_content(manifest, instance, managed)?;
+        let unpacked = self.fetch_content(manifest)?;
         let build = self.store_build(manifest)?;
+        let content = self.put_content(&unpacked, manifest, instance, managed)?;
         let imported = self
             .launcher
             .import(&build.program, &manifest.horizon_base)?;
@@ -437,6 +456,17 @@ mod tests {
         assert!(matches!(outcome, Outcome::Kept(_)));
         assert_eq!(state.sequence, 1);
         assert_eq!(read(&world.staged), OLD_PROGRAM);
+        assert_eq!(installed_marker(&world, "rustcraft"), None);
+    }
+
+    #[test]
+    fn a_program_that_fails_its_check_leaves_the_content_out_too() {
+        let world = world(1);
+        let mut site = content_site(&world, 2, &[("rustcraft", "v2")]);
+        site.files.insert(ASSET.into(), gzip(b"MZ evil game"));
+        let (state, outcome) = run_staged(&world, &world.state, &site);
+        assert!(matches!(outcome, Outcome::Kept(_)));
+        assert!(state.content.is_empty());
         assert_eq!(installed_marker(&world, "rustcraft"), None);
     }
 

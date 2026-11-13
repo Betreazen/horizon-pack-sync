@@ -48,15 +48,19 @@ function Get-NextSequence([string]$Repository) {
     return [int64](($numbers | Measure-Object -Maximum).Maximum) + 1
 }
 
+# Build output, git internals and test or example trees are never shipped, whatever they hold.
 function Find-ModFiles([string]$Source, [string]$Name) {
+    $skipped = '[\\/](target|\.git|tests?|examples?|fixtures|node_modules)[\\/]'
     return @(Get-ChildItem -LiteralPath $Source -Recurse -Filter $Name |
-        Where-Object { $_.FullName -notmatch '[\/](target|\.git)[\/]' })
+        Where-Object { $_.FullName.Substring($Source.Length) -notmatch $skipped })
 }
 
 # The id a content mod's horizon-mod.toml declares: its top-level `id`, before any [table].
 function Get-ContentId([string]$Manifest) {
     $top = ((Get-Content -Raw -LiteralPath $Manifest) -split '(?m)^\s*\[', 2)[0]
-    if ($top -notmatch '(?m)^\s*id\s*=\s*"([a-z0-9_.-]+)"') { throw "$Manifest has no usable id" }
+    if ($top -cnotmatch '(?m)^\s*id\s*=\s*"([a-z0-9_.-]+)"') {
+        throw "$Manifest has no usable id (lowercase letters, digits, _ - .)"
+    }
     return $Matches[1]
 }
 
