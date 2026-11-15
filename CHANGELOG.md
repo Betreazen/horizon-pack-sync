@@ -4,6 +4,10 @@ All notable changes to pack-sync and pack-sync-hub. The project follows [Semanti
 
 ## [Unreleased]
 
+### Added
+
+- `"side": "client"` for a mod in `pack.json`: `publish.ps1` builds it into the players' game and leaves it out of the Linux server engine, for client-only mods that do not compile on Linux. Such a mod may not carry content mods.
+
 ## [0.2.0] - 2026-11-15
 
 ### Added

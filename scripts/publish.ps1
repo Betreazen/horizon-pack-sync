@@ -23,6 +23,8 @@ $Launcher = "$env:LOCALAPPDATA\HorizonLauncher\horizon-launcher.exe"
 $Versions = "$env:APPDATA\horizon-launcher\versions"
 $Work = Join-Path $Root '.build'
 $Mods = Join-Path $Work 'mods'
+# The bundles the Linux server engine compiles: all of $Mods except mods marked "side": "client".
+$ServerMods = Join-Path $Work 'server-mods'
 $Out = Join-Path $Work 'out'
 $Content = Join-Path $Work 'content'
 $PackSync = Join-Path $Root 'target\release\pack-sync.exe'
@@ -66,12 +68,21 @@ function Get-ContentId([string]$Manifest) {
 
 # Native bundles (horizon-mixin.toml) compile into the game; content mods (horizon-mod.toml with
 # assets/ and data/) travel beside it in client-content.tar.gz, one folder per mod id.
-function Copy-ModFiles([string]$Source) {
+# A client-only mod compiles into the player's game but not into the server engine. It may not
+# carry content: pack-sync installs content on the server too, and the server compares content
+# lists with every player.
+function Copy-ModFiles([string]$Source, [bool]$ClientOnly) {
     $bundles = Find-ModFiles $Source 'horizon-mixin.toml'
     $contents = Find-ModFiles $Source 'horizon-mod.toml'
     if (-not $bundles -and -not $contents) { throw "No horizon-mixin.toml or horizon-mod.toml under $Source" }
+    if ($ClientOnly -and $contents) { throw "$Source is marked client-only but has content mods: they must be on both sides" }
     foreach ($bundle in $bundles) {
         Copy-Item -LiteralPath $bundle.Directory.FullName -Destination $Mods -Recurse
+        if ($ClientOnly) {
+            Write-Host "Client-only bundle $($bundle.Directory.Name): left out of the server engine"
+        } else {
+            Copy-Item -LiteralPath $bundle.Directory.FullName -Destination $ServerMods -Recurse
+        }
     }
     foreach ($manifest in $contents) {
         $id = Get-ContentId $manifest.FullName
@@ -89,15 +100,18 @@ function Copy-ModFiles([string]$Source) {
 
 function Get-Mods($Pack) {
     foreach ($mod in $Pack.mods) {
+        $side = if ($mod.side) { $mod.side } else { 'both' }
+        if ($side -cnotin 'both', 'client') { throw "pack.json: side `"$side`" is neither both nor client" }
+        $clientOnly = $side -eq 'client'
         if ($mod.path) {
-            Copy-ModFiles $mod.path
+            Copy-ModFiles $mod.path $clientOnly
             continue
         }
         $name = $mod.repo -replace '[^A-Za-z0-9_.-]', '_'
         $checkout = Join-Path $Work "src\$name"
         git clone --quiet --depth 1 --branch $mod.tag "https://github.com/$($mod.repo).git" $checkout
         Assert-Success "Cloning $($mod.repo)"
-        Copy-ModFiles $checkout
+        Copy-ModFiles $checkout $clientOnly
     }
 }
 
@@ -140,7 +154,7 @@ function Build-Server([string]$Base) {
     if (-not (Test-Path -LiteralPath $prepared)) { throw "$Base is not prepared on this computer" }
     docker run --rm --cpus (Get-CoreCount) `
         -v "${CacheVolume}:/cache" `
-        -v "${Mods}:/mods:ro" `
+        -v "${ServerMods}:/mods:ro" `
         -v "${prepared}:/prepared:ro" `
         -v "${Out}:/out" `
         -e "BASE=$Base" -e "BUILD_PROFILE=$BuildProfile" -e 'TRUST_FLAG=--trust-native-code' `
@@ -153,7 +167,7 @@ if (-not (Test-Path -LiteralPath $Config)) {
 }
 $Pack = Get-Content -Raw -LiteralPath (Join-Path $PackDir 'pack.json') | ConvertFrom-Json
 if (Test-Path -LiteralPath $Work) { Remove-Item -LiteralPath $Work -Recurse -Force }
-New-Item -ItemType Directory -Force $Mods, $Out | Out-Null
+New-Item -ItemType Directory -Force $Mods, $ServerMods, $Out | Out-Null
 Get-Mods $Pack
 # A trial build stays on this computer, so it does not need the repository to exist yet.
 $Sequence = if ($NoUpload) { 1 } else { Get-NextSequence $Pack.repository }

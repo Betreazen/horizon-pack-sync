@@ -49,6 +49,7 @@ Create a **private** GitHub repository, for example `you/your-pack`, with two fi
   "horizon_base": "nightly-2026-11-08-fdc87ae",
   "mods": [
     { "repo": "you/your-mod", "tag": "v1.0.0" },
+    { "repo": "you/a-client-only-mod", "tag": "v0.1.0", "side": "client" },
     { "path": "C:/mods/a-mod-in-progress" }
   ]
 }
@@ -59,6 +60,7 @@ Create a **private** GitHub repository, for example `you/your-pack`, with two fi
 | `repository` | This repository. Builds are published as its releases `pack-1`, `pack-2`, … |
 | `horizon_base` | The installed Horizon version (release or Nightly) whose game files the build plays with. It must be installed and prepared in your launcher |
 | `mods` | Each mod is a public GitHub repository at a tag, or a local folder for trying things out. Every folder with a `horizon-mixin.toml` inside is built into the game. Every folder with a `horizon-mod.toml` is a content mod: its `horizon-mod.toml`, `assets/` and `data/` ship beside the game and are turned on for players and the server. Keep anything else with those files out of the tagged tree, because it ships too |
+| `side` (per mod, optional) | `both` (the default) or `client`. A `client` mod is built into the players' game only and left out of the Linux server engine. Use it for mods that do nothing on a server, such as a recorder or a HUD, especially when they do not compile on Linux. Players with the mod can still join a server without it. A `client` mod cannot carry content mods, because the server must have the same content as every player |
 
 **`pack-sync.toml`** is baked into the `pack-sync` program you give players:
 

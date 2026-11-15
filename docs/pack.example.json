@@ -3,6 +3,7 @@
   "horizon_base": "nightly-2026-11-08-fdc87ae",
   "mods": [
     { "repo": "you/your-mod", "tag": "v1.0.0" },
+    { "repo": "you/a-client-only-mod", "tag": "v0.1.0", "side": "client" },
     { "path": "C:/mods/a-mod-in-progress" }
   ]
 }
