@@ -164,7 +164,7 @@ No. It is an independent tool for servers running Horizon, built on the launcher
 
 ## Status
 
-Running on the author's server since November 2026. Covered by 119 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run. So is shipping content mods (`client-content.tar.gz`): the author's pack has published two such builds, the latest being pack-7, with eight mods and two of them content mods. Both are verified and wait for a server to confirm them.
+Running on the author's server since November 2026. Covered by 119 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run. Shipping content mods (`client-content.tar.gz`) runs live on the server side: the author's server installed pack-9 with two content mods, 1193 files, and switched them on. The player side of content is covered by tests and waits for its first live run.
 
 ## Contributing
 
