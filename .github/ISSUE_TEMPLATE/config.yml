@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/Betreazen/horizon-pack-sync/security/advisories/new
+    about: Anything that could let unsigned code run, or leak codes, tokens or keys.
+  - name: Horizon itself
+    url: https://github.com/horizon-rust/horizon/issues
+    about: Problems with the game, the launcher or native mods belong to the Horizon project.

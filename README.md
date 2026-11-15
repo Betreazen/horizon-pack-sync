@@ -13,7 +13,7 @@ You publish a build once. The game server moves to it within minutes, and each p
 <img src="https://img.shields.io/badge/Rust-2024-7CF29C?labelColor=07070F&style=for-the-badge" alt="Rust 2024">
 <a href="https://github.com/horizon-rust/horizon"><img src="https://img.shields.io/badge/for-Horizon-3DDBD9?labelColor=07070F&style=for-the-badge" alt="For Horizon"></a>
 
-[How it works](#how-it-works) · [For players](#for-players) · [For pack owners](#for-pack-owners) · [Security](docs/security.md) · [API](docs/api.md) · [**По-русски**](README.ru.md)
+[How it works](#how-it-works) · [For players](#for-players) · [For pack owners](#for-pack-owners) · [Security](docs/security.md) · [API](docs/api.md) · [Changelog](CHANGELOG.md) · [**По-русски**](README.ru.md)
 
 </div>
 
@@ -60,6 +60,7 @@ The hub is the only piece that talks to GitHub. Run the ready-made `pack-sync-hu
 - 🔏 **Signed builds.** ed25519 signatures with an offline key. A stolen GitHub account or hub cannot push code to players: anything not signed by you is refused.
 - 🔁 **Never ahead of the server.** Players receive only the build the server confirmed. Build numbers only grow, so an old build cannot be replayed.
 - ⚡ **Works in the same launch.** The update lands in the copy of the game the launcher is about to start, so one press of Play is enough.
+- 📦 **Content mods too.** Blocks, items, models and recipes from `horizon-mod.toml` mods ride along as their own signed file and are switched on for the server and every player. Folders the player added by hand are left alone.
 - 🛟 **Automatic rollback.** A server build that fails to start is undone and remembered as bad.
 - 🔒 **Private by design.** The GitHub token never leaves the hub, files come through short-lived GitHub links, and players get personal codes you can revoke. Players never receive the server build, which carries files made from the game.
 - 🎮 **The game always starts.** No network, no hub, a bad download: the player plays on the build they have, and the reason goes to a log.
@@ -163,7 +164,11 @@ No. It is an independent tool for servers running Horizon, built on the launcher
 
 ## Status
 
-Running on the author's server since November 2026. Covered by 119 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run. So is shipping content mods (`client-content.tar.gz`): its first build, pack-6 of the author's pack, is published and verified and waits for a server to confirm it.
+Running on the author's server since November 2026. Covered by 119 tests. Checked end to end: the server installs new builds by itself, confirms them, and players install and join. Swapping a player's game for a build with a different binary in the same launch is covered by tests and is waiting for its first live run. So is shipping content mods (`client-content.tar.gz`): the author's pack has published two such builds, the latest being pack-7, with eight mods and two of them content mods. Both are verified and wait for a server to confirm them.
+
+## Contributing
+
+Bug reports and ideas are welcome in [Issues](https://github.com/Betreazen/horizon-pack-sync/issues/new/choose). Security problems go to [private reporting](SECURITY.md). Pull requests should pass what CI runs: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`.
 
 ## License
 

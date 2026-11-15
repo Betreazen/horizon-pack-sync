@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in pack-sync or pack-sync-hub does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go to [private reporting](https://github.com/Betreazen/horizon-pack-sync/security/advisories/new), not here.
+        Do not paste personal codes, tokens or keys: replace them with `***`.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part
+      options:
+        - pack-sync client (player's game)
+        - pack-sync setup (installer)
+        - pack-sync server (game server)
+        - publish.ps1 / release
+        - pack-sync-hub
+        - deploy scripts
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: pack-sync commit
+      description: The commit of horizon-pack-sync your binaries were built from.
+      placeholder: 9bc657d
+    validations:
+      required: true
+  - type: input
+    id: horizon
+    attributes:
+      label: Horizon version
+      description: The pack's `horizon_base` and the launcher version.
+      placeholder: nightly-2026-11-08-fdc87ae, launcher 0.x
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        Player: `%LOCALAPPDATA%\PackSync\<profile>\pack-sync.log`.
+        Server: `journalctl -u pack-sync-server`.
+      render: text

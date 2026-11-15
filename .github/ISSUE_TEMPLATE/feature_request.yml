@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest something pack-sync could do for pack owners or players
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is hard or impossible today, and for whom (pack owner, player, server operator).
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Effect on trust
+      description: pack-sync only runs code the pack owner signed. Does your idea keep that true?
