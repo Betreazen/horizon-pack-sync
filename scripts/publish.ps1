@@ -20,6 +20,18 @@ if (-not $TrustNativeCode) {
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Launcher = "$env:LOCALAPPDATA\HorizonLauncher\horizon-launcher.exe"
+# The launcher's --profile: launcher 0.2.72 (2026-11-18) takes only "optimized"; older ones took
+# dev, performance and release. Asked once from the launcher's own help.
+function Get-LauncherProfile([string]$Wanted) {
+    if (-not $script:LauncherProfiles) {
+        $help = (& $Launcher native-build --help 2>&1) -join "`n"
+        $m = [regex]::Match($help, 'possible values: ([^\]]+)\]')
+        $script:LauncherProfiles = if ($m.Success) { @($m.Groups[1].Value -split ',\s*') } else { @($Wanted) }
+    }
+    if ($script:LauncherProfiles -contains $Wanted) { return $Wanted }
+    return $script:LauncherProfiles[0]
+}
+
 $Versions = "$env:APPDATA\horizon-launcher\versions"
 $Work = Join-Path $Root '.build'
 $Mods = Join-Path $Work 'mods'
@@ -126,7 +138,7 @@ function Build-Client([string]$Base) {
         Assert-Success 'Creating the build instance'
     }
     $arguments = @('native-build', "`"$Mods`"", '--instance', $BuildInstance, '--version', $Base,
-        '--profile', $BuildProfile, '--trust-native-code')
+        '--profile', (Get-LauncherProfile $BuildProfile), '--trust-native-code')
     $process = Start-Process $Launcher -ArgumentList $arguments -PassThru -NoNewWindow
     $null = $process.Handle
     $process.ProcessorAffinity = [IntPtr]((1L -shl (Get-CoreCount)) - 1)
