@@ -8,6 +8,10 @@ All notable changes to pack-sync and pack-sync-hub. The project follows [Semanti
 
 - `"side": "client"` for a mod in `pack.json`: `publish.ps1` builds it into the players' game and leaves it out of the Linux server engine, for client-only mods that do not compile on Linux. Such a mod may not carry content mods.
 
+### Fixed
+
+- A player's update to a new build with content mods no longer fails on Play with "the launcher has no instance …". The launcher sets `HORIZON_HOME` to the instance folder for the commands it runs before a game, and a launcher started with it lists only that folder. `pack-sync client` now calls the launcher without it. Players need the new `pack-sync.exe` once; builds without content were not affected.
+
 ## [0.2.0] - 2026-11-15
 
 ### Added

@@ -9,6 +9,10 @@ use serde::Deserialize;
 const VERSIONS_FOLDER: &str = "versions";
 const LAUNCHER_FOLDER: &str = "horizon-launcher";
 const GAME_PROGRAM: &str = "horizon-client.exe";
+/// Set by the launcher for the commands around a game it starts: the instance's game folder.
+/// A launcher run with it sees only that folder, as its one default instance, so pack-sync's
+/// pre-launch run could not find its own instance and every update with content failed.
+const LAUNCH_HOME_VARIABLE: &str = "HORIZON_HOME";
 
 pub trait Launcher {
     fn installed(&self) -> Result<Installed>;
@@ -65,9 +69,16 @@ impl RealLauncher {
         Ok(path)
     }
 
+    /// The launcher as the player would run it, also from inside a launch.
+    fn command(&self, arguments: &[&str]) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(arguments).env_remove(LAUNCH_HOME_VARIABLE);
+        command
+    }
+
     fn run(&self, arguments: &[&str]) -> Result<Output> {
-        let output = Command::new(&self.program)
-            .args(arguments)
+        let output = self
+            .command(arguments)
             .output()
             .context("cannot start the Horizon launcher")?;
         if !output.status.success() {
@@ -252,6 +263,19 @@ pub mod tests {
         assert_eq!(
             instances[0].home.as_deref(),
             Some(Path::new("C:\\games\\pack"))
+        );
+    }
+
+    #[test]
+    fn the_launcher_runs_without_the_launch_home_it_was_started_in() {
+        let launcher = RealLauncher::new("horizon-launcher.exe".into());
+        let command = launcher.command(&["--json", "instance", "list"]);
+        let removed = command
+            .get_envs()
+            .any(|(name, value)| name == LAUNCH_HOME_VARIABLE && value.is_none());
+        assert!(
+            removed,
+            "{LAUNCH_HOME_VARIABLE} must not reach the launcher"
         );
     }
 }
